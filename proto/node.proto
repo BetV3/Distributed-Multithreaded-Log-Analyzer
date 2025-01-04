@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package main;
+option go_package = ".;main";
+
+// Define the gRPC service
+service MapReduceService {
+    rpc ProcessMap (MapRequest) returns (MapResponse) {}
+    rpc ProcessReduce (ReduceRequest) returns (ReduceResponse) {}
+}
+
+// Request/Response messages for the Map phase
+message MapRequest {
+    string chunk_id = 1;    // Identifier for the log chunk
+    bytes log_data = 2;     // Raw chunk data (part of log)
+}
+
+message MapResponse {
+    repeated PartialResult partial_results = 1;
+}
+
+
+//Intermediate result structure
+message PartialResult {
+    string key = 1;        // ex. log endpoint, IP address, status code
+    int64 count = 2;      // How many times that key appeared in the log
+}
+
+// Request/Response messages for the Reduce phase
+message ReduceRequest {
+    repeated PartialResult partial_results = 1;
+}
+
+message ReduceResponse {
+    repeated AggregatedResult results = 1;
+}
+
+message AggregatedResult {
+    string key = 1;        // ex. log endpoint, IP address, status code
+    int64 total_count = 2;      // How many times that key appeared in the log
+}
