@@ -1,0 +1,60 @@
+# We assume your repo is structured with cmd/master/main.go and cmd/worker/main.go
+# Adjust paths and commands to match your actual code.
+
+image: golang:1.23
+
+variables:
+  # You can optionally enable Go's module cache to speed up builds
+  # by storing module dependencies between jobs.
+  # Setting GOMODCACHE is optional; the default ~/.cache/go-build also works.
+  GOMODCACHE: "/cache/go/pkg"
+
+cache:
+  # Cache your Go modules between pipeline runs
+  paths:
+    - go.sum
+    - go.mod
+    - /cache/go/pkg
+
+stages:
+  - build
+  - test  # Optional stage if you want to build/push Docker images
+
+# ---------------------------
+# 1. BUILD STAGE
+# ---------------------------
+build:
+  stage: build
+  script:
+    - echo "Building Master and Worker binaries..."
+    - go mod download
+    # Build the Master binary
+    - go build -o master ./cmd/master
+    # Build the Worker binary
+    - go build -o worker ./cmd/worker
+  artifacts:
+    # Store the resulting binaries so subsequent stages can use them if needed
+    paths:
+      - master
+      - worker
+  # If your build job doesn't produce warnings or errors, it succeeds.
+
+# ---------------------------
+# 2. TEST STAGE
+# ---------------------------
+test:
+  stage: test
+  script:
+    - echo "Running unit tests..."
+    - go test -v ./...     # Runs tests in all sub-directories
+  # No artifacts required here unless you have specific test reports
+  # e.g., coverage or JUnit XML. Example:
+  # artifacts:
+  #   reports:
+  #     junit: report.xml
+
+# ---------------------------
+# 3. CONTAINERIZE STAGE (Optional)
+# ---------------------------
+# This stage shows how you might build/push Docker images to GitLab's container registry.
+# Only do this if you want to containerize your Master/Worker at this point.
