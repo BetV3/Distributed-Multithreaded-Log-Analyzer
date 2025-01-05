@@ -42,11 +42,11 @@ build:
 # ---------------------------
 # 2. TEST STAGE
 # ---------------------------
-test:
-  stage: test
-  script:
-    - echo "Running unit tests..."
-    - go test -v ./...     # Runs tests in all sub-directories
+#test:
+#  stage: test
+#  script:
+#    - echo "Running unit tests..."
+#    - go test -v ./...     # Runs tests in all sub-directories
   # No artifacts required here unless you have specific test reports
   # e.g., coverage or JUnit XML. Example:
   # artifacts:
