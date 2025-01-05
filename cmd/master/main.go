@@ -5,7 +5,7 @@ import (
 	"log"
 	"net"
 
-	pb "gitlab.betv3.xyz/BetV3/distributed-key-value-store/proto"
+	pb "gitlab.betv3.xyz/BetV3/distributed-key-value-store/internal/grpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )

@@ -1,7 +1,8 @@
 syntax = "proto3";
 
-package main;
-option go_package = ".;main";
+package mapreduce;
+
+option go_package = ".;grpc";
 
 // Define the gRPC service
 service MapReduceService {
