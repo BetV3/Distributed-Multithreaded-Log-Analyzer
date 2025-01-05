@@ -2,82 +2,88 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
-	"net"
+	"sync"
 
 	pb "gitlab.betv3.xyz/BetV3/distributed-key-value-store/internal/grpc"
 	"google.golang.org/grpc"
 )
 
-// masterServer implements the MapReduceServiceServer interface
-// In a typical mini-MapReduce, the workers might implement these methods
-// But if your design calls for the master to also handle gRPC requests, here is an example
-type masterServer struct {
-	pb.UnimplementedMapReduceServiceServer
-}
-
-// ProcessReduce is called when a client (possibly a worker or external client)
-// Sends a MapRequest to this Master Service
-func (m *masterServer) ProcessMap(ctx context.Context, req *pb.MapRequest) (*pb.MapResponse, error) {
-	log.Println(("[MASTER] Received ProcessMap request for chunk: %s"), req.ChunkId)
-
-	// -- Example: Just log or mock a response for now -- 
-	// eventually, might distribute tasks to other components
-	// or store partial resultss in a map, etc.
-
-	return &pb.MapResponse{
-		PartialResults: []*pb.PartialResult{
-			{
-				Key:	"dummy_key",
-				Count: 1,
-			},
-		},
-	}, nil
-}
-
-// ProcessReduce merges partial results. In the master-as-server scenario,
-// the caller (worker or specialized reducer node) might send partial results,
-// and the master aggregates them.
-func (m *masterServer) ProcessReduce(ctx context.Context, req *pb.ReduceRequest) (*pb.ReduceResponse, error) {
-	log.Println(("[MASTER] Received ProcessReduce request"))
-
-	// -- Example: Summation of counts form all partial results -- 
-	aggregatedCounts := map[string]int64{}
-
-	for _, pr := range req.PartialResults {
-		aggregatedCounts[pr.Key] += pr.Count
-	}
-
-	var results []*pb.AggregatedResult
-	for k, v := range aggregatedCounts {
-		results = append(results, &pb.AggregatedResult{
-			Key: k,
-			TotalCount: v,
-		})
-	}
-
-	return &pb.ReduceResponse{
-		Results: results,
-	}, nil
+// For now, we will not only hardcode and use our local machine as the worker
+var workers = []string{
+	"localhost:50051",
 }
 
 func main() {
-	// Create Listen on TCP port 50051
-	lis, err := net.Listen("tcp", ":50051")
-	if err != nil {
-		log.Fatalf("Failed to listen: %v", err)
-	}
-	// Create a gRPC server
-	grpcServer := grpc.NewServer()
-
-	// Register our masterServer as the gRPC handler
-	pb.RegisterMapReduceServiceServer(grpcServer, &masterServer{})
-
-	log.Println("[MASTER] server started on port 50051")
-
-	// start serving requests
-	if err := grpcServer.Serve(lis); err != nil {
-		log.Fatalf("Failed to serve: %v", err)
+	log.Println("[MASTER] Starting master server...")
+	// 1. Split the file into chunks
+	// For example, we might read a large log file in 1MB increments or parse line by line.
+	// chunkData, err := splitFile("path/to/file.log")
+	chunkData := [][]byte{
+		[]byte("Log chunk #1"),
+		[]byte("Log chunk #2"),
 	}
 
+	// 2. Distribute chunks to workers
+	var allPartialResults []*pb.PartialResult
+	var mu sync.Mutex // to safely append to allPartialResults
+
+	var wg sync.WaitGroup
+	wg.Add(len(chunkData))
+
+	for i, chunk := range chunkData {
+		go func(chunkID int, data []byte) {
+			defer wg.Done()
+			// pick a worker randomly (could be based on round robin)
+			workerAddr := workers[chunkID%len(workers)]
+
+			// connect to worker
+			conn, err := grpc.Dial(workerAddr, grpc.WithInsecure())
+			if err != nil {
+				log.Printf("[MASTER] Failed to dial worker at %s: %v", workerAddr, err)
+				return
+			}
+			defer conn.Close()
+
+			client := pb.NewMapReduceServiceClient(conn)
+
+			req := &pb.MapRequest{
+				ChunkId: fmt.Sprintf("chunk-%d", chunkID),
+				LogData: data,
+			}
+
+			// Call ProcessMap on the worker
+			resp, err := client.ProcessMap(context.Background(), req)
+			if err != nil {
+				log.Printf("[MASTER] Error calling ProcessMap on worker %s: %v", workerAddr, err)
+				return
+			}
+
+			// Lock and append results
+			mu.Lock()
+			allPartialResults = append(allPartialResults, resp.PartialResults...)
+			mu.Unlock()
+		}(i, chunk)
+	}
+	wg.Wait()
+	log.Printf("[MASTER] Received all partial results: %v", allPartialResults)
+	// 3. Aggregate partial results (reduce) - either locally or by calling the ProcessReduce 
+	// Lets do it locally for now and simplicity
+	aggregate := localReduce(allPartialResults)
+	log.Printf("[MASTER] Final Aggregated results: %v", aggregate)
+	// ALTERNATIVELY, you could call ProcessReduce on a worker
+	// reduceResp, err := client.ProcessReduce(context.Background(), &pb.ReduceRequest{
+	// 	PartialResults: allPartialResults,
+	// })
+
+	// Save or output the final aggregated results
+}
+
+func localReduce(partials []*pb.PartialResult) map[string]int64 {
+	counts := make(map[string]int64)
+	for _, pr := range partials {
+		counts[pr.Key] += pr.Count
+	}
+	return counts
 }

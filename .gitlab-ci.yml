@@ -18,7 +18,7 @@ cache:
 
 stages:
   - build
-  - test  # Optional stage if you want to build/push Docker images
+  # will add later - test  # Optional stage if you want to build/push Docker images
 
 # ---------------------------
 # 1. BUILD STAGE

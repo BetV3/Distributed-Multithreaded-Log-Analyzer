@@ -292,3 +292,17 @@ By following this end-to-end roadmap, you’ll build a **robust, multi-machine, 
 3. **Run Local Tests**
    Use go test ./... for unit tests
    Use go run main.go --help or simlar to see CLI options
+
+---
+
+### Potential Future Improvements
+1.	**Chunking Strategy**
+   Decide on the logic for splitting logs (by byte size, by line boundaries, etc.).
+2.	**Dynamic Discovery**
+   Instead of hardcoding worker addresses, the Master could discover workers dynamically via service registry (Consul, etc.).
+3.	**Fault Tolerance**
+   If a worker goes down mid-task, have the Master retry that chunk on another worker.
+4.	**Monitoring & Metrics**
+   Add Prometheus instrumentation to measure how fast tasks are processed, worker CPU usage, etc.
+5.	**Reduce Phase**
+   Use a more robust reduce approach (call ProcessReduce on one or multiple workers) if your dataset is huge or if you want to distribute the aggregation as well.
