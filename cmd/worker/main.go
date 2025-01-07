@@ -1,13 +1,15 @@
 package main
 
 import (
-	"context" 
+	"context"
 	"log"
 	"net"
+	"strings"
 
 	pb "gitlab.betv3.xyz/BetV3/distributed-key-value-store/internal/grpc"
 	"google.golang.org/grpc"
 )
+
 // workerServer implements the pb.MapReduceServiceServer
 type workerServer struct {
 	pb.UnimplementedMapReduceServiceServer
@@ -18,9 +20,33 @@ func (s *workerServer) ProcessMap(ctx context.Context, req *pb.MapRequest) (*pb.
 	log.Printf("[WORKER] Recieved Map request for chunk %s", req.ChunkId)
 
 	// 1. Parse the req.LogData, do the "map" logic (counting status codes and stuff like that)
-	partialResults := doMapOperation(req.LogData)
+	logContent := string(req.LogData)
+	lines := strings.Split(logContent, "\n")
 
-	// 2. Construct the response
+	counts := make(map[string]int64)
+	// example log line: 
+	// "in24.inetnebr.com - - [01/Aug/1995:00:00:01 -0400] "GET /shuttle/missions/sts-68/news/sts-68-mcc-05.txt HTTP/1.0" 200 1839
+
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) == 0 {
+			continue
+		}
+		statusCode := parts[len(parts)-2]
+		counts[statusCode]++
+	}
+
+	// 2 Prepare the partial results
+	var partialResults []*pb.PartialResult
+	for k, v := range counts {
+		partialResults = append(partialResults, &pb.PartialResult{
+			Key: k,
+			Count: v,
+		})
+	}
 	return &pb.MapResponse{
 		PartialResults: partialResults,
 	}, nil
