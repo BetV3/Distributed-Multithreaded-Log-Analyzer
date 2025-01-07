@@ -97,8 +97,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to listen: %v", err)
 	}
-
-	grpcServer := grpc.NewServer()
+	serverOptions := []grpc.ServerOption{
+		grpc.MaxRecvMsgSize(1024 * 1024 * 64),
+		grpc.MaxSendMsgSize(1024 * 1024 * 64),
+	}
+	grpcServer := grpc.NewServer(serverOptions...)
 	pb.RegisterMapReduceServiceServer(grpcServer, &workerServer{})
 
 	//Will implement server reflection for debugging
