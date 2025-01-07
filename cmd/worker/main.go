@@ -35,7 +35,7 @@ func (s *workerServer) ProcessMap(ctx context.Context, req *pb.MapRequest) (*pb.
 		if len(parts) == 0 {
 			continue
 		}
-		statusCode := parts[len(parts)-8]
+		statusCode := parts[8]
 		counts[statusCode]++
 	}
 
