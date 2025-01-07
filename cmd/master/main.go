@@ -1,13 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"sync"
-	"bufio"
 
 	pb "gitlab.betv3.xyz/BetV3/distributed-key-value-store/internal/grpc"
 	"google.golang.org/grpc"
@@ -15,8 +16,12 @@ import (
 
 // For now, we will not only hardcode and use our local machine as the worker
 var workers = []string{
-	"localhost:50051",
+	"192.168.0.238:50051",
+	"192.168.0.241:50051",
+	"192.168.0.207:50051",
 }
+
+const chunkSize = 50 * 1024 * 1024
 
 func main() {
 	log.Println("[MASTER] Starting master server...")
@@ -41,7 +46,7 @@ func main() {
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
+	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 
 	// 1. Split the file into chunks
 	// For example, we might read a large log file in 1MB increments or parse line by line.
@@ -51,32 +56,35 @@ func main() {
 	var allPartialResults []*pb.PartialResult
 
 	var wg sync.WaitGroup
-	chunk := []string{}
 	chunkID := 0
 	workerIndex := 0
-	for scanner.Scan() {
-		line := scanner.Text()
-		chunk = append(chunk, line)
-		if len(chunk) >= 10000 {
-			wg.Add(1)
-			currentChunk := make([]string, len(chunk))
-			copy(currentChunk, chunk)
-			currentWorker := workers[workerIndex%len(workers)]
-			// workerIndex++
-			go sendChunk(chunkID, currentChunk, currentWorker, &wg)
+	buffer := make([]byte, chunkSize)
+	for {
+		n, err := file.Read(buffer)
+		if n > 0 {
+			dataChunk := make([]byte, n)
+			copy(dataChunk, buffer[:n])
+
+			// Create and send chunk to worker
+			go sendChunk(chunkID, dataChunk, workers[workerIndex%len(workers)], &wg)
 			chunkID++
-			chunk = []string{}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Fatalf("Failed to read chunk: %v", err)
 		}
 	}
 	log.Print("Finished reading the file")
-	if len(chunk) > 0 {
+/* 	if len(chunk) > 0 {
 		wg.Add(1)
 		currentChunk := make([]string, len(chunk))
 		copy(currentChunk, chunk)
 		currentWorker := workers[workerIndex%len(workers)]
 		go sendChunk(chunkID, currentChunk, currentWorker, &wg)
 		chunkID++
-	}
+	} */
 
 	if err := scanner.Err(); err != nil {
 		log.Fatalf("Failed to read file: %v", err)
@@ -101,10 +109,13 @@ func trimSpace(s string) string {
 	return string([]byte(s))
 }
 
-func sendChunk(id int, lines []string, workerAddr string, wg *sync.WaitGroup) {
+func sendChunk(id int, lines []byte, workerAddr string, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	conn, err := grpc.Dial(workerAddr, grpc.WithInsecure())
+	conn, err := grpc.Dial(workerAddr, grpc.WithInsecure(), grpc.WithDefaultCallOptions(
+		grpc.MaxCallRecvMsgSize(1024*1024*1024),
+		grpc.MaxCallSendMsgSize(1024*1024*1024),
+	))
 	if err != nil {
 		log.Fatalf("Failed to dial worker %s: %v", workerAddr, err)
 	}
@@ -112,11 +123,10 @@ func sendChunk(id int, lines []string, workerAddr string, wg *sync.WaitGroup) {
 
 	client := pb.NewMapReduceServiceClient(conn)
 
-	logData := []byte(fmt.Sprintf("%v", joinLines(lines)))
 
 	req := &pb.MapRequest{
 		ChunkId: fmt.Sprintf("chunk-%d", id),
-		LogData: logData,
+		LogData: lines,
 	}
 
 	resp, err := client.ProcessMap(context.Background(), req)

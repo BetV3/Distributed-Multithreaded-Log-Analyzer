@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"log"
 	"net"
@@ -20,17 +21,17 @@ func (s *workerServer) ProcessMap(ctx context.Context, req *pb.MapRequest) (*pb.
 	log.Printf("[WORKER] Recieved Map request for chunk %s", req.ChunkId)
 
 	// 1. Parse the req.LogData, do the "map" logic (counting status codes and stuff like that)
-	logContent := string(req.LogData)
-	lines := strings.Split(logContent, "\n")
+	lines := bytes.Split(req.LogData, []byte("\n"))
 
 	counts := make(map[string]int64)
 	// example log line: 
 	// "in24.inetnebr.com - - [01/Aug/1995:00:00:01 -0400] "GET /shuttle/missions/sts-68/news/sts-68-mcc-05.txt HTTP/1.0" 200 1839
 
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
+	for _, lineBytes := range lines {
+		if len(lineBytes) == 0 {
 			continue
 		}
+		line := string(lineBytes)
 		parts := strings.Fields(line)
 		if len(parts) == 0 {
 			continue
