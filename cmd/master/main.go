@@ -11,7 +11,7 @@ import (
 	"os"
 	"sync"
 
-	pb "gitlab.betv3.xyz/BetV3/distributed-key-value-store/internal/grpc"
+	pb "github.com/BetV3/Distributed-Multithreaded-Log-Analyzer/internal/grpc"
 	"google.golang.org/grpc"
 )
 
