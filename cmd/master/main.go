@@ -17,9 +17,17 @@ import (
 
 // For now, we will not only hardcode and use our local machine as the worker
 var workers = []string{
-	"192.168.0.238:50051",
-	"192.168.0.241:50051",
-	"192.168.0.207:50051",
+	"192.168.0.238:50051", // bravo worker 1
+	"192.168.0.241:50051", // bravo worker 2
+	"192.168.0.207:50051", // bravo worker 3
+	"192.168.0.206:50051", // alpha worker 4
+	"192.168.0.222:50051", // alpha worker 5
+	"192.168.0.216:50051", // bravo worker 6
+	"192.168.0.224:50051", // bravo worker 7
+	"192.168.0.231:50051", // delta worker 8
+	"192.168.0.202:50051", // delta worker 9
+	"192.168.0.227:50051", // charlie worker 10
+	"192.168.0.221:50051", // charlie worker 11
 }
 
 const chunkSize = 50 * 1024 * 1024
