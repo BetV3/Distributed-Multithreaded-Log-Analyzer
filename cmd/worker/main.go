@@ -3,9 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log"
 	"net"
-	"strings"
+	"regexp"
 
 	pb "gitlab.betv3.xyz/BetV3/distributed-key-value-store/internal/grpc"
 	"google.golang.org/grpc"
@@ -32,11 +33,22 @@ func (s *workerServer) ProcessMap(ctx context.Context, req *pb.MapRequest) (*pb.
 			continue
 		}
 		line := string(lineBytes)
-		parts := strings.Fields(line)
-		if len(parts) == 0 {
+		logRegex := regexp.MustCompile(`(?P<IP>\S+) \S+ \S+ \[(?P<Date>[^\]]+)] "(?P<Request>[^"]*)" (?P<StatusCode>\d{3}) (?P<Size>\d+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"`)
+		matches := logRegex.FindStringSubmatch(line)
+		if matches == nil {
+			fmt.Println("No match found")
 			continue
 		}
-		statusCode := parts[8]
+		fields := []string {
+			matches[1], // IP address
+			matches[2], // Date
+			matches[3], // Request
+			matches[4], // Status code
+			matches[5], // Response size
+			matches[6], // Referrer
+			matches[7], // User agent
+		}
+		statusCode := fields[3]
 		counts[statusCode]++
 	}
 
