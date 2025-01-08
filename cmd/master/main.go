@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
@@ -53,24 +54,32 @@ func main() {
 	// chunkData, err := splitFile("path/to/file.log")
 
 	// 2. Distribute chunks to workers
-	var allPartialResults []*pb.PartialResult
+	var (
+		allPartialResults []*pb.PartialResult
+		mu                sync.Mutex
+	)
 
 	var wg sync.WaitGroup
 	chunkID := 0
 	workerIndex := 0
 	buffer := make([]byte, chunkSize)
+	leftover := make([]byte, 0)
 	for {
 		n, err := file.Read(buffer)
-		if n > 0 {
-			wg.Add(1)
-			dataChunk := make([]byte, n)
-			copy(dataChunk, buffer[:n])
-
-			// Create and send chunk to worker
-			go sendChunk(chunkID, dataChunk, workers[workerIndex%len(workers)], &wg)
-			chunkID++
-			workerIndex++
+		if n == 0 {
+			break
 		}
+		wg.Add(1)
+		data := append(leftover, buffer[:n]...)
+		lastNewline := bytes.LastIndexByte(data, '\n')
+		if lastNewline == -1 {
+			lastNewline = len(data)
+		}
+		chunk := data[:lastNewline]
+		leftover = data[lastNewline+1:]
+		go sendChunk(chunkID, chunk, workers[workerIndex%len(workers)], &wg, &allPartialResults, &mu)
+		chunkID++
+		workerIndex++
 		if err == io.EOF {
 			break
 		}
@@ -107,13 +116,10 @@ func main() {
 	// Save or output the final aggregated results
 }
 
-func trimSpace(s string) string {
-	return string([]byte(s))
-}
 
-func sendChunk(id int, lines []byte, workerAddr string, wg *sync.WaitGroup) {
+func sendChunk(id int, lines []byte, workerAddr string, wg *sync.WaitGroup, allPartialResults *[]*pb.PartialResult, mu *sync.Mutex) {
 	defer wg.Done()
-
+	
 	conn, err := grpc.Dial(workerAddr, grpc.WithInsecure(), grpc.WithDefaultCallOptions(
 		grpc.MaxCallRecvMsgSize(1024*1024*1024),
 		grpc.MaxCallSendMsgSize(1024*1024*1024),
@@ -136,8 +142,11 @@ func sendChunk(id int, lines []byte, workerAddr string, wg *sync.WaitGroup) {
 		log.Fatalf("Failed to process map: %v", err)
 		return
 	}
-	log.Printf("Chunk %d processed by worker %s, with %d partial results", id, workerAddr, len(resp.PartialResults))
-	log.Printf("Partial results: %v", localReduce(resp.PartialResults))
+	mu.Lock()
+	*allPartialResults = append(*allPartialResults, resp.PartialResults...)
+	mu.Unlock()
+	//log.Printf("Chunk %d processed by worker %s, with %d partial results", id, workerAddr, len(resp.PartialResults))
+	//log.Printf("Partial results: %v", localReduce(resp.PartialResults))
 }
 
 
