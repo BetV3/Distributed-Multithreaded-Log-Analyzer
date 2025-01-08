@@ -20,25 +20,26 @@ type workerServer struct {
 // ProcessMap handles the Map phase of the job
 func (s *workerServer) ProcessMap(ctx context.Context, req *pb.MapRequest) (*pb.MapResponse, error){
 	log.Printf("[WORKER] Recieved Map request for chunk %s", req.ChunkId)
-
-	// 1. Parse the req.LogData, do the "map" logic (counting status codes and stuff like that)
+	// Split the log data by new line
 	lines := bytes.Split(req.LogData, []byte("\n"))
-
+	// Create a map to store the counts of each status code
 	counts := make(map[string]int64)
-	// example log line: 
-	// "in24.inetnebr.com - - [01/Aug/1995:00:00:01 -0400] "GET /shuttle/missions/sts-68/news/sts-68-mcc-05.txt HTTP/1.0" 200 1839
-
+	// Iterate over each line and extract the status code
 	for _, lineBytes := range lines {
 		if len(lineBytes) == 0 {
 			continue
 		}
+		// Convert the line to a string
 		line := string(lineBytes)
+		// Define a regex to extract the fields
 		logRegex := regexp.MustCompile(`(?P<IP>\S+) \S+ \S+ \[(?P<Date>[^\]]+)] "(?P<Request>[^"]*)" (?P<StatusCode>\d{3}) (?P<Size>\d+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"`)
+		// Find the matches
 		matches := logRegex.FindStringSubmatch(line)
 		if matches == nil {
 			fmt.Println("No match found")
 			continue
 		}
+		// Extract the fields
 		fields := []string {
 			matches[1], // IP address
 			matches[2], // Date
@@ -52,7 +53,7 @@ func (s *workerServer) ProcessMap(ctx context.Context, req *pb.MapRequest) (*pb.
 		counts[statusCode]++
 	}
 
-	// 2 Prepare the partial results
+	// Prepare the partial results
 	var partialResults []*pb.PartialResult
 	for k, v := range counts {
 		partialResults = append(partialResults, &pb.PartialResult{
@@ -60,60 +61,25 @@ func (s *workerServer) ProcessMap(ctx context.Context, req *pb.MapRequest) (*pb.
 			Count: v,
 		})
 	}
+	// Return the partial results
 	return &pb.MapResponse{
 		PartialResults: partialResults,
 	}, nil
 }
 
-// ProcessReduce handles the Reduce phase of the ob (when master does not implement)
-func (s *workerServer) ProcessReduce(ctx context.Context, req *pb.ReduceRequest) (*pb.ReduceResponse, error) {
-	log.Printf("[WORKER] received ReduceRequest with %d partial results", len(req.PartialResults))
-
-	//Merge partial results into aggregated results
-	aggregated := doReduceOperation(req.PartialResults)
-
-	return &pb.ReduceResponse{
-		Results: aggregated,
-	}, nil
-}
-
-// helper function to parse log data and return partial data
-func doMapOperation(logData []byte) []*pb.PartialResult {
-	// For now, we will just return a dummy result
-	return []*pb.PartialResult{
-		{
-			Key:   "200",
-			Count: 42,
-		},
-		{
-			Key: "404",
-			Count: 3,
-		},
-	}
-}
-// helper function to merge partial results into aggregated results
-func doReduceOperation(partialResults []*pb.PartialResult) []*pb.AggregatedResult {
-	counts := make(map[string]int64)
-	for _, pr := range partialResults {
-		counts[pr.Key] += pr.Count
-	}
-
-	var result []*pb.AggregatedResult
-	for k, v := range counts {
-		result = append(result, &pb.AggregatedResult{Key: k, TotalCount: v})
-	}
-	return result
-}
 
 func main() {
+	// Create a listener on port 50051
 	lis, err := net.Listen("tcp", ":50051")
 	if err != nil {
 		log.Fatalf("Failed to listen: %v", err)
 	}
+	// Create a grpc options to allow large messages (64MB)
 	serverOptions := []grpc.ServerOption{
 		grpc.MaxRecvMsgSize(1024 * 1024 * 64),
 		grpc.MaxSendMsgSize(1024 * 1024 * 64),
 	}
+	// Create a new gRPC server with the options
 	grpcServer := grpc.NewServer(serverOptions...)
 	pb.RegisterMapReduceServiceServer(grpcServer, &workerServer{})
 

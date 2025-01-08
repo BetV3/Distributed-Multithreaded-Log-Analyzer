@@ -15,28 +15,18 @@ import (
 	"google.golang.org/grpc"
 )
 
-// For now, we will not only hardcode and use our local machine as the worker
+// For now, we will hardcode the worker addresses
 var workers = []string{
-	"192.168.0.238:50051", // bravo worker 1
-	"192.168.0.241:50051", // bravo worker 2
-	"192.168.0.207:50051", // bravo worker 3
-	"192.168.0.206:50051", // alpha worker 4
-	"192.168.0.222:50051", // alpha worker 5
-	"192.168.0.216:50051", // bravo worker 6
-	"192.168.0.224:50051", // bravo worker 7
-	"192.168.0.231:50051", // delta worker 8
-	"192.168.0.202:50051", // delta worker 9
-	"192.168.0.227:50051", // charlie worker 10
-	"192.168.0.221:50051", // charlie worker 11
+	"127.0.0.1:50051",
+	// add more workers here
 }
 
 const chunkSize = 50 * 1024 * 1024
 
 func main() {
 	log.Println("[MASTER] Starting master server...")
-
+	// Parse the command line flags
 	filename := flag.String("file", "", "Path to the log file")
-	// maybe add workers flag to specify worker addresses
 	flag.Parse()
 
 	//validate the filename
@@ -53,38 +43,43 @@ func main() {
 		log.Fatalf("Failed to open file: %v", err)
 	}
 	defer file.Close()
-
+	// Create a buffered 10MB scanner
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
-
-	// 1. Split the file into chunks
-	// For example, we might read a large log file in 1MB increments or parse line by line.
-	// chunkData, err := splitFile("path/to/file.log")
-
-	// 2. Distribute chunks to workers
+	// Instantiate partialResults variable to store all partial results
 	var (
 		allPartialResults []*pb.PartialResult
 		mu                sync.Mutex
 	)
-
+	// Create a WaitGroup to wait for all workers to finish
 	var wg sync.WaitGroup
+	// instantiate chunkID and workerIndex variables
 	chunkID := 0
 	workerIndex := 0
+	// create a buffer to store the chunk data
 	buffer := make([]byte, chunkSize)
 	leftover := make([]byte, 0)
+	// Read the file in chunks and send each chunk to a worker
 	for {
 		n, err := file.Read(buffer)
+		// Break if we didnt read anything
 		if n == 0 {
 			break
 		}
+		// add delta to the waitgroup counter
 		wg.Add(1)
+		// append the leftover data from the previous chunk
 		data := append(leftover, buffer[:n]...)
+		// find the last newline character in the chunk
 		lastNewline := bytes.LastIndexByte(data, '\n')
 		if lastNewline == -1 {
 			lastNewline = len(data)
 		}
+		// split the chunk at the last newline character
 		chunk := data[:lastNewline]
+		// store the leftover data for the next chunk
 		leftover = data[lastNewline+1:]
+		// send the chunk to a worker
 		go sendChunk(chunkID, chunk, workers[workerIndex%len(workers)], &wg, &allPartialResults, &mu)
 		chunkID++
 		workerIndex++
@@ -96,38 +91,22 @@ func main() {
 		}
 	}
 	log.Print("Finished reading the file")
-/* 	if len(chunk) > 0 {
-		wg.Add(1)
-		currentChunk := make([]string, len(chunk))
-		copy(currentChunk, chunk)
-		currentWorker := workers[workerIndex%len(workers)]
-		go sendChunk(chunkID, currentChunk, currentWorker, &wg)
-		chunkID++
-	} */
 
 	if err := scanner.Err(); err != nil {
 		log.Fatalf("Failed to read file: %v", err)
 	}
 
-
+	// Wait for all workers to finish
 	wg.Wait()
 	log.Printf("[MASTER] Received all partial results: %v", allPartialResults)
-	// 3. Aggregate partial results (reduce) - either locally or by calling the ProcessReduce 
-	// Lets do it locally for now and simplicity
 	aggregate := localReduce(allPartialResults)
 	log.Printf("[MASTER] Final Aggregated results: %v", aggregate)
-	// ALTERNATIVELY, you could call ProcessReduce on a worker
-	// reduceResp, err := client.ProcessReduce(context.Background(), &pb.ReduceRequest{
-	// 	PartialResults: allPartialResults,
-	// })
-
-	// Save or output the final aggregated results
 }
 
 
 func sendChunk(id int, lines []byte, workerAddr string, wg *sync.WaitGroup, allPartialResults *[]*pb.PartialResult, mu *sync.Mutex) {
 	defer wg.Done()
-	
+	// Connect to the worker
 	conn, err := grpc.Dial(workerAddr, grpc.WithInsecure(), grpc.WithDefaultCallOptions(
 		grpc.MaxCallRecvMsgSize(1024*1024*1024),
 		grpc.MaxCallSendMsgSize(1024*1024*1024),
@@ -136,40 +115,43 @@ func sendChunk(id int, lines []byte, workerAddr string, wg *sync.WaitGroup, allP
 		log.Fatalf("Failed to dial worker %s: %v", workerAddr, err)
 	}
 	defer conn.Close()
-
+	// Create a client
 	client := pb.NewMapReduceServiceClient(conn)
 
-
+	// Create the request for the worker
 	req := &pb.MapRequest{
 		ChunkId: fmt.Sprintf("chunk-%d", id),
 		LogData: lines,
 	}
-
+	// Send the request to the worker
 	resp, err := client.ProcessMap(context.Background(), req)
 	if err != nil {
 		log.Fatalf("Failed to process map: %v", err)
 		return
 	}
+	// Append the partial results to the allPartialResults slice
 	mu.Lock()
 	*allPartialResults = append(*allPartialResults, resp.PartialResults...)
 	mu.Unlock()
-	//log.Printf("Chunk %d processed by worker %s, with %d partial results", id, workerAddr, len(resp.PartialResults))
-	//log.Printf("Partial results: %v", localReduce(resp.PartialResults))
 }
 
 
+// localReduce aggregates partial results from multiple sources into a single
+// map. It takes a slice of PartialResult pointers and returns a map where the
+// keys are the same as the PartialResult keys and the values are the sum of
+// the counts for each key.
+//
+// Parameters:
+//   partials - a slice of pointers to PartialResult, each containing a key and
+//              a count.
+//
+// Returns:
+//   A map where each key is a string from the PartialResult and the value is
+//   the total count for that key.
 func localReduce(partials []*pb.PartialResult) map[string]int64 {
 	counts := make(map[string]int64)
 	for _, pr := range partials {
 		counts[pr.Key] += pr.Count
 	}
 	return counts
-}
-
-func joinLines(lines []string) string {
-	result := ""
-	for _, line := range lines {
-		result += line + "\n"
-	}
-	return result
 }
