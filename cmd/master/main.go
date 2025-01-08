@@ -62,12 +62,14 @@ func main() {
 	for {
 		n, err := file.Read(buffer)
 		if n > 0 {
+			wg.Add(1)
 			dataChunk := make([]byte, n)
 			copy(dataChunk, buffer[:n])
 
 			// Create and send chunk to worker
 			go sendChunk(chunkID, dataChunk, workers[workerIndex%len(workers)], &wg)
 			chunkID++
+			workerIndex++
 		}
 		if err == io.EOF {
 			break
