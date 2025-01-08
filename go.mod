@@ -1,4 +1,4 @@
-module gitlab.betv3.xyz/BetV3/distributed-key-value-store
+module github.com/BetV3/Distributed-Multithreaded-Log-Analyzer
 
 go 1.23.4
 
